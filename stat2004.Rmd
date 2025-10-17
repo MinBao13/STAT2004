@@ -162,38 +162,21 @@ ConvertedPollute <- rf_imp$xvar
 ```
 
 ```{r}
-# --- PART 3: RANDOM FOREST CLASSIFICATION MODEL (FIXED FOR SPECIAL CHARACTERS) ---
-
-# NOTE: This code assumes the data frame 'data_clean' exists and contains the AQI_Level column.
-
-# 1. Load the required library
-# Run this line once if you haven't installed it yet: install.packages("randomForestSRC")
-if (!require(randomForestSRC)) library(randomForestSRC)
-
-# 2. Data Preparation: Define Predictors and Target
-target_variable <- "AQI_Level"
-
-# The predictor names are the original names from data_clean (1 to 13)
-predictor_columns <- names(data_clean)[1:13]
-
-# CRITICAL FIX: Wrap column names in backticks (`) to handle the parentheses
-quoted_predictors <- paste0("`", predictor_columns, "`")
-
-# Create the final formula using the backticked names
-model_formula <- as.formula(paste(target_variable, "~", paste(quoted_predictors, collapse = " + ")))
-
 # 3. Data Split (Training and Testing Sets)
 set.seed(42) # For reproducibility
-train_index <- sample(1:nrow(data_clean), size = 0.7 * nrow(data_clean)) # 70% for training
-train_data <- data_clean[train_index, ]
-test_data <- data_clean[-train_index, ]
+train_index <- sample(1:nrow(ConvertedPollute), size = 0.8 * nrow(ConvertedPollute)) # 80% for training
+train_data <- ConvertedPollute[train_index, ]
+test_data <- ConvertedPollute[-train_index, ]
+```
+
+```{r}
+# --- PART 3: RANDOM FOREST CLASSIFICATION MODEL  ---
 
 # 4. Model Training
-print("Starting Random Forest Model Training...")
 
 # Train the classification model using rfsrc
 rf_model <- rfsrc(
-  model_formula, 
+  AQI ~ . - AQI_level, 
   data = train_data, 
   ntree = 500,
   importance = "none",
@@ -205,6 +188,7 @@ print("Model Summary:")
 print(rf_model)
 
 ```
+
 ```{r}
 # --- PART 4: MODEL EVALUATION ---
 
@@ -313,6 +297,7 @@ par(mar = c(5, 4, 4, 2) + 0.1)
 
 print("✅ Final Variable Importance Plot code executed.")
 ```
+
 
 
 
