@@ -15,7 +15,6 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 
-
 # --- Impute Data ---
 
 ```{r}
@@ -120,7 +119,7 @@ AQI <- function(P){
     i_hi = c(  50,  100,  150,  200,   300,   400,   500)
   )
 
-#Calc AQI
+  # --- Helper: subindex interpolation ---
   calc_subindex <- function(C, bp) {
     sapply(C, function(cval) {
       r <- which(cval >= bp$c_lo & cval <= bp$c_hi)[1]
@@ -128,12 +127,12 @@ AQI <- function(P){
     })
   }
 
-  # Return Max AQI value
+  # --- Compute subindices and overall AQI ---
   aqi_co  <- calc_subindex(CO,  CO_bp)
   aqi_no2 <- calc_subindex(NO2, NO2_bp)
   max_aqi <- pmax(aqi_co, aqi_no2)
 
-  # AQI Category
+  # --- AQI categories ---
   category <- cut(
     max_aqi,
     breaks = c(-Inf, 50, 100, 150, 200, 300, 400, Inf),
@@ -142,7 +141,7 @@ AQI <- function(P){
     right = TRUE
   )
 
-  
+  # --- Return both AQI and category ---
   data.frame(
     AQI = round(max_aqi, 2),
     Category = category
@@ -170,15 +169,15 @@ test_data <- ConvertedPollute[-train_index, ]
 ```
 
 ```{r}
-# --- PART 3: RANDOM FOREST CLASSIFICATION MODEL  ---
+# --- PART 3: RANDOM FOREST MODEL  ---
 
 # 4. Model Training
 
-# Train the classification model using rfsrc
+# Train the model using rfsrc
 rf_model <- rfsrc(
   AQI ~ . - AQI_level, 
   data = train_data, 
-  ntree = 500,
+  ntree = 300,
   importance = "none",
   seed = 42
 )
@@ -192,110 +191,64 @@ print(rf_model)
 ```{r}
 # --- PART 4: MODEL EVALUATION ---
 
-# Requires 'rf_model' and 'test_data' from the previous step.
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model, newdata = test_data)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(test_data$AQI)
 
-# 1. Prediction on the test set
-print("Starting prediction on test data...")
-rf_predictions <- predict(rf_model, newdata = test_data)
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
 
-# Extract the predicted class labels
-predicted_classes <- rf_predictions$class
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
 
-# 2. Create the Confusion Matrix
-# Ensure both Actual and Predicted variables are factors with the same levels
-actual_classes <- test_data$AQI_Level
-# Use the levels from the training data to ensure consistency
-levels(predicted_classes) <- levels(actual_classes)
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
 
-# Base R table function for Confusion Matrix
-confusion_matrix <- table(Actual = actual_classes, Predicted = predicted_classes)
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
 
-# 3. Calculate Overall Accuracy
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-
-print("✅ Model Evaluation Complete.")
-print("--- Confusion Matrix (Test Data) ---")
-print(confusion_matrix)
-print("-----------------------------------")
-print(paste("Overall Accuracy on Test Set:", round(accuracy, 4)))
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
 ```
 
 ```{r}
-# --- PART 5: VARIABLE IMPORTANCE (Final Robust Version) ---
-
-# 1. Rerun Model with Importance Calculation (if not done in the previous step)
-# This step ensures the importance scores were computed during training.
-print("Ensuring Model is trained with Importance...")
-rf_model_importance <- rfsrc(
-  model_formula, 
-  data = train_data, 
+rf_model_imp <- rfsrc(
+  AQI ~ . - AQI_level,
+  data = train_data,
   ntree = 500,
-  importance = "permute", 
+  na.action = "na.impute",
+  importance = TRUE,
   seed = 42
 )
-
-# 2. Extract Importance Scores by filtering the class labels
-# The VIMP matrix has a column for each class. We only care about observed classes.
-importance_matrix <- rf_model_importance$importance
-
-# Identify the columns (classes) that actually have data (non-zero frequency)
-# Based on your output, these are: Very unhealthy, Hazardous, Undefined
-observed_classes <- c("Very unhealthy", "Hazardous", "Undefined")
-
-# Extract the importance columns only for the observed classes
-vimp_observed <- importance_matrix[, observed_classes]
-
-# Calculate the overall VIMP by taking the mean (or max) across the observed classes
-# We will take the mean for a general measure of variable power.
-overall_vimp <- rowMeans(vimp_observed)
-
-# 3. Create the final data frame and sort
-vimp_scores <- data.frame(
-  Variable = names(overall_vimp),
-  VIMP = overall_vimp,
-  row.names = NULL
-)
-
-# Sort by VIMP score (highest is most important)
-vimp_scores <- vimp_scores[order(vimp_scores$VIMP, decreasing = TRUE), ]
-
-print("✅ Variable Importance Calculation Complete (Robust Method).")
-print("Top 5 Most Important Predictors (Overall Mean VIMP):")
-print(head(vimp_scores, 5))
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
 ```
 
 ```{r}
-# --- FINAL PLOT: VARIABLE IMPORTANCE BAR CHART (BASE R GRAPHICS) ---
+# helper to bucket numeric AQI into EPA categories
+bucket_aqi <- function(x){
+  cut(x,
+      breaks = c(-Inf, 50, 100, 150, 200, 300, 400, Inf),
+      labels = c("Good","Moderate","Unhealthy (Sensitive)",
+                 "Unhealthy","Very Unhealthy","Hazardous","Extremely Hazardous"),
+      right = TRUE)
+}
 
-# NOTE: This code requires the 'vimp_scores' data frame created in the last step.
+pred_level <- bucket_aqi(y_hat)
+true_level <- test_data$AQI_level
 
-# Sort the data frame by VIMP score (it should already be sorted, but ensures order)
-vimp_scores <- vimp_scores[order(vimp_scores$VIMP), ]
-
-# 1. Prepare Plotting Area
-# Increase the margin on the left side (7) to fit the variable names
-par(mar = c(5, 7, 4, 2) + 0.1) 
-
-# 2. Create the Bar Chart
-barplot(
-    vimp_scores$VIMP,
-    names.arg = vimp_scores$Variable,
-    horiz = TRUE, # Draw bars horizontally
-    las = 1,     # Rotate y-axis labels horizontally for readability
-    col = hcl.colors(nrow(vimp_scores), "SunsetDark"), # Use a nice color palette
-    main = "Variable Importance for Predicting AQI Level",
-    xlab = "Overall Variable Importance (VIMP)",
-    ylab = "",   # Y-axis label is the variable name
-    cex.names = 0.9 # Shrink variable name font size slightly
-)
-
-# 3. Add Title and Labels
-title(sub = "Calculated using Mean VIMP of Observed Classes")
-
-# Reset margins to default 
-par(mar = c(5, 4, 4, 2) + 0.1)
-
-print("✅ Final Variable Importance Plot code executed.")
+cm <- table(Truth = true_level, Pred = pred_level)
+acc <- sum(diag(cm)) / sum(cm)
+cm
+cat(sprintf("\nCategorical accuracy after bucketing: %.3f\n", acc))
 ```
 
 
