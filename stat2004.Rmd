@@ -1,114 +1,168 @@
+---
+title: "Untitled"
+output: html_document
+date: '2025-10-17'
+---
 
-
-```{r}
-# --- PART 1: COMPLETE DATA PREPARATION (FINAL ROBUST VERSION + DEBUGGING) ---
-
-# A. Data Import and Numeric Selection
-data <- readxl::read_excel("AirQualityUCI.xlsx")
-data_numeric <- as.data.frame(data[, 3:15]) # Convert to standard data.frame
-
-# B. Data Cleaning: MANUAL TYPE CONVERSION (Fixing comma decimals)
-for (i in 1:ncol(data_numeric)) {
-  data_numeric[, i] <- as.character(data_numeric[, i])
-  data_numeric[, i] <- gsub(",", ".", data_numeric[, i])
-  data_numeric[, i] <- as.numeric(data_numeric[, i])
-}
-
-# C. Imputation and Unit Conversion
-data_clean <- data_numeric
-
-# CRITICAL FIX 1: Convert the dataset's missing marker (-200) to NA
-# This must happen before imputation.
-data_clean[data_clean == -200] <- NA
-
-# 1. Mean Imputation (Handles NA values, including the ones we just created)
-for (i in 1:ncol(data_clean)) {
-  current_mean <- mean(data_clean[, i], na.rm = TRUE)
-  data_clean[is.na(data_clean[, i]), i] <- current_mean
-}
-
-# --- FINAL CORRECTION TO PART 1 (Unit Conversion) ---
-
-# CRITICAL FIX 1: Convert the dataset's missing marker (-200) to NA
-# This must happen before imputation.
-data_clean[data_clean == -200] <- NA
-
-# 1. Mean Imputation (Handles NA values, including the ones we just created)
-for (i in 1:ncol(data_clean)) {
-  current_mean <- mean(data_clean[, i], na.rm = TRUE)
-  data_clean[is.na(data_clean[, i]), i] <- current_mean
-}
-
-# FIX 2: Ozone Unit Conversion (Using the correct column name: PT08.S5(O3))
-data_clean$`PT08.S5(O3)` <- (data_clean$`PT08.S5(O3)` * 0.51) / 1000
-
-print("✅ Part 1: Data Preparation Complete. ALL errors fixed.")
-print(paste("Final Cleaned Data Dimensions:", paste(dim(data_clean), collapse = "x")))
-
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 ```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+# --- Impute Data ---
+
 ```{r}
-# --- PART 2-A: Define AQI Breakpoints and IP Calculation Function (FIXED) ---
+library(dplyr)
+library(randomForestSRC)
+library(MASS)
+```
 
-# 1. FIXED AQI Breakpoints (Ozone column name updated to PT08.S5(O3))
-aqi_breakpoints <- data.frame(
-  Pollutant = c(rep("PT08.S5(O3)", 7), rep("CO(GT)", 7), rep("PT08.S3(NOx)", 7)), 
-  BP_Lo = c(0.000, 0.055, 0.071, 0.086, 0.106, 0.205, 0.405, 
-            0.0, 4.5, 9.5, 12.5, 15.5, 30.5, 40.5, 
-            0, 54, 101, 361, 650, 1250, 1650), 
-  BP_Hi = c(0.054, 0.070, 0.085, 0.105, 0.204, 0.404, 0.604, 
-            4.4, 9.4, 12.4, 15.4, 30.4, 40.4, 50.4, 
-            53, 100, 360, 649, 1249, 1649, 2049),
-  I_Lo = c(0, 51, 101, 151, 201, 301, 401, 0, 51, 101, 151, 201, 301, 401, 0, 51, 101, 151, 201, 301, 401),
-  I_Hi = c(50, 100, 150, 200, 300, 400, 500, 50, 100, 150, 200, 300, 400, 500, 50, 100, 150, 200, 300, 400, 500)
-)
-# Note: I've also updated CO and NOx names based on your debug output for consistency
-pollutant_cols <- unique(aqi_breakpoints$Pollutant)
+```{r}
+Pollute <- readxl::read_excel("AirQualityUCI.xlsx")
+```
 
+```{r}
+pollutants <- c(3:15)
+Pollute[pollutants] <- lapply(Pollute[pollutants], function(x) na_if(x, -200))
+```
 
-# 2. Function to calculate the Individual Pollutant Index (Ip) - REMAINS UNCHANGED
-calculate_ip <- function(Cp, pollutant_name, aqi_breakpoints) {
-  if (is.na(Cp) || Cp < 0) return(NA)
-  pollutant_bps <- aqi_breakpoints[aqi_breakpoints$Pollutant == pollutant_name, ]
-  matched_row <- pollutant_bps[pollutant_bps$BP_Lo <= Cp & Cp <= pollutant_bps$BP_Hi, ]
+```{r}
+Pollute1 <- Pollute[3:15]
+```
+
+#Impute using random forest
+```{r}
+rf_imp <- rfsrc(data = Pollute1, nodesize = 1, nsplit = 10, nimpute = 2, na.action = "na.impute")
+```
+
+#Extract the imputed data
+```{r}
+ImputedPollute <- rf_imp$xvar
+```
+
+# --- Unit Conversion ---
+
+```{r}
+#Converters 
+mgm3_CO <- function(C, temperature = 25, pressure = 1) {
+  # C: concentration in mg/m³
+  # temperature: °C (default 25°C)
+  # pressure: atm (default 1 atm)
   
-  if (nrow(matched_row) != 1) {
-    if (Cp > max(pollutant_bps$BP_Hi)) { matched_row <- pollutant_bps[which.max(pollutant_bps$BP_Hi), ] } else { return(NA) }
+  mol_weight <- 28.01  # g/mol for CO
+  T <- temperature + 273.15  # Convert to Kelvin
+  
+  # Conversion formula
+  ppm <- (C * 24.45 * pressure) / (mol_weight * (T / 298))
+  
+  return(ppm)
+}
+
+microg_NO2 <- function(C, temperature = 25, pressure = 1) {
+  # C: concentration in µg/m³
+  # temperature: °C (default 25°C)
+  # pressure: atm (default 1 atm)
+  
+  mol_weight <- 46.01  # g/mol for NO2
+  T <- temperature + 273.15  # convert to Kelvin
+  
+  # Convert µg/m³ to mg/m³ first
+  mg_m3 <- C / 1000
+  
+  # Conversion formula:
+  # ppm = (mg/m³ * 24.45 * (P / 1 atm)) / (MW * (T / 298 K))
+  ppm <- (mg_m3 * 24.45 * pressure) / (mol_weight * (T / 298))
+  
+  # Convert ppm → ppb
+  ppb <- ppm * 1000
+  
+  return(ppb)
+}
+```
+
+```{r}
+# Apply conversion to dataset
+ConvertedPollute <- ImputedPollute %>%
+  mutate(
+    `CO(GT)` = mgm3_CO(`CO(GT)`),       # Convert CO from mg/m³ to ppm
+    `NO2(GT)` = microg_NO2(`NO2(GT)`)   # Convert NO2 from µg/m³ to ppb
+  )
+```
+
+# --- Calculate AQI ---
+
+```{r}
+# AQI calculator returning both AQI value and category
+AQI <- function(P){
+  # Extract pollutant vectors
+  CO  <- P$CO
+  NO2 <- P$NO2 
+
+  # --- Breakpoint tables ---
+  CO_bp <- data.frame(
+    c_lo = c(0.0, 4.5,  9.5, 12.5, 15.5, 30.5, 40.5),
+    c_hi = c(4.4, 9.4, 12.4, 15.4, 30.4, 40.4, 50.4),
+    i_lo = c(  0,  51, 101, 151, 201, 301, 401),
+    i_hi = c( 50, 100, 150, 200, 300, 400, 500)
+  )
+
+  NO2_bp <- data.frame(
+    c_lo = c(   0,   54,  101,  361,   650,  1250,  1650),
+    c_hi = c(  53,  100,  360,  649,  1249,  1649,  2049),
+    i_lo = c(   0,   51,  101,  151,   201,   301,   401),
+    i_hi = c(  50,  100,  150,  200,   300,   400,   500)
+  )
+
+  # --- Helper: subindex interpolation ---
+  calc_subindex <- function(C, bp) {
+    sapply(C, function(cval) {
+      r <- which(cval >= bp$c_lo & cval <= bp$c_hi)[1]
+      with(bp[r, ], (i_hi - i_lo) / (c_hi - c_lo) * (cval - c_lo) + i_lo)
+    })
   }
-  I_Hi <- matched_row$I_Hi[1]; I_Lo <- matched_row$I_Lo[1]
-  BP_Hi <- matched_row$BP_Hi[1]; BP_Lo <- matched_row$BP_Lo[1]
-  Ip <- max(0, ((I_Hi - I_Lo) / (BP_Hi - BP_Lo)) * (Cp - BP_Lo) + I_Lo)
-  return(Ip)
+
+  # --- Compute subindices and overall AQI ---
+  aqi_co  <- calc_subindex(CO,  CO_bp)
+  aqi_no2 <- calc_subindex(NO2, NO2_bp)
+  max_aqi <- pmax(aqi_co, aqi_no2)
+
+  # --- AQI categories ---
+  category <- cut(
+    max_aqi,
+    breaks = c(-Inf, 50, 100, 150, 200, 300, 400, Inf),
+    labels = c("Good", "Moderate", "Unhealthy (Sensitive)",
+               "Unhealthy", "Very Unhealthy", "Hazardous", "Extremely Hazardous"),
+    right = TRUE
+  )
+
+  # --- Return both AQI and category ---
+  data.frame(
+    AQI = round(max_aqi, 2),
+    Category = category
+  )
 }
-print("AQI Breakpoints and Calculation Function Defined with correct names.")
+
+df <- data.frame(CO = ConvertedPollute$`CO(GT)`, NO2 = ConvertedPollute$`NO2(GT)`)  
+
+AQI_results <- AQI(df)
+ConvertedPollute$AQI <- AQI_results$AQI
+ConvertedPollute$AQI_level <- AQI_results$Category
 ```
 
 ```{r}
-# --- PART 2-B: Calculate Individual Pollutant Indices ---
-for (col in pollutant_cols) {
-  # This uses the correct names from pollutant_cols
-  data_clean[[paste0("AQI_", col)]] <- as.numeric(sapply(data_clean[[col]], calculate_ip, pollutant_name = col, aqi_breakpoints = aqi_breakpoints))
-}
-
-aqi_columns <- grep("^AQI_", names(data_clean), value = TRUE)
-print(paste("Individual AQI columns created:", paste(aqi_columns, collapse = ", ")))
+rf_imp <- rfsrc(data = ConvertedPollute, nodesize = 1, nsplit = 10, nimpute = 2, na.action = "na.impute")
 ```
+
 ```{r}
-# --- PART 2-C: Calculate Overall AQI and Level ---
-
-# 1. Calculate Overall AQI (Maximum of all individual pollutant AQI values)
-data_clean$AQI <- apply(data_clean[, aqi_columns, drop = FALSE], 1, max, na.rm = TRUE) 
-data_clean$AQI[is.infinite(data_clean$AQI)] <- NA
-
-# 2. Create the classification variable (AQI_Level)
-data_clean$AQI_Level <- cut(data_clean$AQI,
-                            breaks = c(-Inf, 50, 100, 150, 200, 300, 400, 500, Inf),
-                            labels = c("Good", "Moderate", "Unhealthy for specific groups", "Unhealthy", "Very unhealthy", "Hazardous", "Hazardous", "Undefined"),
-                            right = TRUE, include.lowest = TRUE)
-
-print("✅ Overall AQI Calculation Complete.")
-print(head(data_clean[, c("AQI", "AQI_Level", "CO(GT)", "PT08.S5(O3)", "PT08.S3(NOx)")]))
+ConvertedPollute <- rf_imp$xvar
 ```
-
 ```{r}
 # --- PART 3: RANDOM FOREST CLASSIFICATION MODEL (FIXED FOR SPECIAL CHARACTERS) ---
 
@@ -261,4 +315,5 @@ par(mar = c(5, 4, 4, 2) + 0.1)
 
 print("✅ Final Variable Importance Plot code executed.")
 ```
+
 
