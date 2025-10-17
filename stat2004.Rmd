@@ -251,6 +251,8 @@ cm
 cat(sprintf("\nCategorical accuracy after bucketing: %.3f\n", acc))
 ```
 
+#Add more stuff or explore different models, for example, AQI ~ only pollutants or AQI ~ temperature + other vars. 
+
 
 
 
