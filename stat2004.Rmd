@@ -120,7 +120,7 @@ AQI <- function(P){
     i_hi = c(  50,  100,  150,  200,   300,   400,   500)
   )
 
-  # --- Helper: subindex interpolation ---
+#Calc AQI
   calc_subindex <- function(C, bp) {
     sapply(C, function(cval) {
       r <- which(cval >= bp$c_lo & cval <= bp$c_hi)[1]
@@ -128,12 +128,12 @@ AQI <- function(P){
     })
   }
 
-  # --- Compute subindices and overall AQI ---
+  # Return Max AQI value
   aqi_co  <- calc_subindex(CO,  CO_bp)
   aqi_no2 <- calc_subindex(NO2, NO2_bp)
   max_aqi <- pmax(aqi_co, aqi_no2)
 
-  # --- AQI categories ---
+  # AQI Category
   category <- cut(
     max_aqi,
     breaks = c(-Inf, 50, 100, 150, 200, 300, 400, Inf),
@@ -142,7 +142,7 @@ AQI <- function(P){
     right = TRUE
   )
 
-  # --- Return both AQI and category ---
+  
   data.frame(
     AQI = round(max_aqi, 2),
     Category = category
@@ -315,5 +315,6 @@ par(mar = c(5, 4, 4, 2) + 0.1)
 
 print("✅ Final Variable Importance Plot code executed.")
 ```
+
 
 
