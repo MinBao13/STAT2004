@@ -158,11 +158,9 @@ ConvertedPollute$AQI_level <- AQI_results$Category
 
 ```{r}
 rf_imp <- rfsrc(data = ConvertedPollute, nodesize = 1, nsplit = 10, nimpute = 2, na.action = "na.impute")
-```
-
-```{r}
 ConvertedPollute <- rf_imp$xvar
 ```
+
 ```{r}
 # --- PART 3: RANDOM FOREST CLASSIFICATION MODEL (FIXED FOR SPECIAL CHARACTERS) ---
 
@@ -315,6 +313,7 @@ par(mar = c(5, 4, 4, 2) + 0.1)
 
 print("✅ Final Variable Importance Plot code executed.")
 ```
+
 
 
 
