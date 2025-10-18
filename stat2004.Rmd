@@ -179,6 +179,13 @@ plot(pca_result, type = "l", main = "Scree Plot")
 biplot(pca_result, scale = 0)
 ```
 
+```{r}
+pca_data <- as.data.frame(pca_result$x[, 1:2])  # Keep PC1 and PC2
+pca_rf_data <- cbind(pca_data, AQI = ConvertedPollute$AQI)
+rf_pca <- rfsrc(AQI ~ ., data = pca_rf_data, ntree = 500, seed = 42)
+print(rf_pca)
+```
+
 
 ```{r}
 rf_model_diag <- rfsrc(AQI ~ ., data = ConvertedPollute[1:14], ntree = 100, importance = 'none', seed = 42)
@@ -399,4 +406,3 @@ acc <- sum(diag(cm)) / sum(cm)
 cm
 cat(sprintf("\nCategorical accuracy after bucketing: %.3f\n", acc))
 ```
-
