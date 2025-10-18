@@ -171,30 +171,26 @@ test_data <- ConvertedPollute[-train_index, ]
 ```{r}
 # --- PART 3: RANDOM FOREST MODEL  ---
 
-# 4. Model Training
+AllDataTrain <- train_data[1:14]
+AllDataTest <- test_data[1:14]
 
 # Train the model using rfsrc
-rf_model <- rfsrc(
-  AQI ~ . - AQI_level, 
-  data = train_data, 
+rf_model_all <- rfsrc(
+  AQI ~ . , 
+  data = AllDataTrain, 
   ntree = 300,
   importance = "none",
   seed = 42
 )
 
-print("✅ Random Forest Model Training Complete.")
-print("Model Summary:")
-print(rf_model)
+print(rf_model_all)
 
-```
-
-```{r}
 # --- PART 4: MODEL EVALUATION ---
 
 ## ---- Evaluate the trained regression model on the test set ----
-pred_obj <- predict(rf_model, newdata = test_data)
+pred_obj <- predict(rf_model_all, newdata = AllDataTest)
 y_hat    <- as.numeric(pred_obj$predicted)
-y_true   <- as.numeric(test_data$AQI)
+y_true   <- as.numeric(AllDataTest$AQI)
 
 RMSE <- sqrt(mean((y_hat - y_true)^2))
 MAE  <- mean(abs(y_hat - y_true))
@@ -204,7 +200,7 @@ cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
             RMSE, MAE, R2_holdout))
 
 ## OOB R² from the trained model (last tree aggregated)
-R2_oob <- tail(rf_model$rsq, 1)
+R2_oob <- tail(rf_model_all$rsq, 1)
 cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
 
 ## Optional: quick residual diagnostics
@@ -213,12 +209,10 @@ cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
 
 # If you want a quick glance table:
 head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
-```
 
-```{r}
 rf_model_imp <- rfsrc(
-  AQI ~ . - AQI_level,
-  data = train_data,
+  AQI ~ . ,
+  data = AllDataTest,
   ntree = 500,
   na.action = "na.impute",
   importance = TRUE,
@@ -230,9 +224,72 @@ barplot(rf_model_imp$importance,
         col = "skyblue",
         las = 2,
         cex.names = 0.7)
+
 ```
 
 ```{r}
+#Model excluding Carbon Monoxide and Nitrogen Dioxide
+
+OtherDataTrain <- train_data[-c(1,8,15)]
+OtherDataTest <- test_data[-c(1,8,15)]
+
+rf_model_other <- rfsrc(
+  AQI ~ ., 
+  data = OtherDataTrain, 
+  ntree = 300,
+  importance = "none",
+  seed = 42
+)
+
+print(rf_model_other)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_other, newdata = OtherDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(OtherDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_other$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ (. - AQI_level - `CO(GT)` - `NO2(GT)`) ,
+  data = OtherDataTrain,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+
+```
+
+
+```{r}
+
+#IGNORE THIS CHUNK FOR NOW
+
 # helper to bucket numeric AQI into EPA categories
 bucket_aqi <- function(x){
   cut(x,
@@ -250,10 +307,3 @@ acc <- sum(diag(cm)) / sum(cm)
 cm
 cat(sprintf("\nCategorical accuracy after bucketing: %.3f\n", acc))
 ```
-
-#Add more stuff or explore different models, for example, AQI ~ only pollutants or AQI ~ temperature + other vars. 
-
-
-
-
-
