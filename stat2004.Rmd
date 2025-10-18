@@ -160,6 +160,41 @@ rf_imp <- rfsrc(data = ConvertedPollute, nodesize = 1, nsplit = 10, nimpute = 2,
 ConvertedPollute <- rf_imp$xvar
 ```
 
+#PCA ANALYSIS
+
+```{r}
+ScaledPollute <- as.data.frame(scale(ConvertedPollute[1:14]))
+ScaledPollute$AQI_level <- AQI_results$Category
+```
+
+```{r}
+pca_result <- prcomp(ScaledPollute[1:10], center = TRUE, )
+summary(pca_result)
+loadings <- pca_result$rotation
+print(loadings)
+```
+
+```{r}
+plot(pca_result, type = "l", main = "Scree Plot")
+biplot(pca_result, scale = 0)
+```
+
+
+```{r}
+rf_model_diag <- rfsrc(AQI ~ ., data = ConvertedPollute[1:14], ntree = 100, importance = 'none', seed = 42)
+interaction.diag <- find.interaction(rf_model_diag, seed = 42)
+```
+
+```{r}
+head(interaction.diag)
+```
+ 
+```{r}
+plot.variable(rf_model_diag, xvar.names = c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","NO2(GT)"))
+plot.variable(rf_model_diag, xvar.names = c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)"))
+plot.variable(rf_model_diag, xvar.names = c("T", "RH", "AH"))
+```
+
 ```{r}
 # 3. Data Split (Training and Testing Sets)
 set.seed(42) # For reproducibility
@@ -171,14 +206,14 @@ test_data <- ConvertedPollute[-train_index, ]
 ```{r}
 # --- PART 3: RANDOM FOREST MODEL  ---
 
-AllDataTrain <- train_data[1:14]
-AllDataTest <- test_data[1:14]
+AllDataTrain <- (train_data[1:14])
+AllDataTest <- (test_data[1:14])
 
 # Train the model using rfsrc
 rf_model_all <- rfsrc(
   AQI ~ . , 
   data = AllDataTrain, 
-  ntree = 300,
+  ntree = 100,
   importance = "none",
   seed = 42
 )
@@ -224,7 +259,6 @@ barplot(rf_model_imp$importance,
         col = "skyblue",
         las = 2,
         cex.names = 0.7)
-
 ```
 
 ```{r}
@@ -285,6 +319,64 @@ barplot(rf_model_imp$importance,
 
 ```
 
+```{r}
+#Model excluding Carbon Monoxide and Nitrogen Dioxide
+
+##EDITING THIS 
+OtherDataTrain <- train_data[-c(1,8,15)]
+OtherDataTest <- test_data[-c(1,8,15)]
+
+rf_model_other <- rfsrc(
+  AQI ~ ., 
+  data = OtherDataTrain, 
+  ntree = 300,
+  importance = "none",
+  seed = 42
+)
+
+print(rf_model_other)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_other, newdata = OtherDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(OtherDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_other$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ (. - AQI_level - `CO(GT)` - `NO2(GT)`) ,
+  data = OtherDataTrain,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+```
+
 
 ```{r}
 
@@ -307,3 +399,4 @@ acc <- sum(diag(cm)) / sum(cm)
 cm
 cat(sprintf("\nCategorical accuracy after bucketing: %.3f\n", acc))
 ```
+
