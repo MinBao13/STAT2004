@@ -255,7 +255,7 @@ barplot(rf_model_imp$importance,
 
 ```{r}
 rf_model_diag <- rfsrc(AQI ~ ., data = ConvertedPollute[1:14], ntree = 100, importance = 'none', seed = 42)
-interaction.diag <- find.interaction(rf_model_diag, seed = 42)
+interaction.diag <- find.interaction.rfsrc(rf_model_diag, seed = 42)
 ```
 
 ```{r}
@@ -263,9 +263,9 @@ head(interaction.diag)
 ```
  
 ```{r}
-plot.variable(rf_model_diag, xvar.names = c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","NO2(GT)"))
-plot.variable(rf_model_diag, xvar.names = c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)"))
-plot.variable(rf_model_diag, xvar.names = c("T", "RH", "AH"))
+plot.variable.rfsrc(rf_model_diag, xvar.names = c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","NO2(GT)"))
+plot.variable.rfsrc(rf_model_diag, xvar.names = c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)"))
+plot.variable.rfsrc(rf_model_diag, xvar.names = c("T", "RH", "AH"))
 ```
 
 ```{r}
@@ -286,7 +286,7 @@ AllDataTest <- (test_data[1:14])
 rf_model_all <- rfsrc(
   AQI ~ . , 
   data = AllDataTrain, 
-  ntree = 100,
+  ntree = 500,
   importance = "none",
   seed = 42
 )
@@ -343,7 +343,7 @@ OtherDataTest <- test_data[-c(1,8,15)]
 rf_model_other <- rfsrc(
   AQI ~ ., 
   data = OtherDataTrain, 
-  ntree = 300,
+  ntree = 500,
   importance = "none",
   seed = 42
 )
@@ -402,7 +402,7 @@ xNODataTest <- test_data[-c(6,8,15)]
 rf_model_xNO <- rfsrc(
   AQI ~ ., 
   data = xNODataTrain, 
-  ntree = 300,
+  ntree = 500,
   importance = "none",
   seed = 42
 )
@@ -452,6 +452,8 @@ barplot(rf_model_imp$importance,
 
 ```{r}
 # --- PART 3: RANDOM FOREST MODEL  ---
+
+#Pollutants
 
 PollutantDataTrain <- train_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)", "NO2(GT)", "AQI")]
 PollutantDataTest <- test_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)", "NO2(GT)", "AQI")]
@@ -689,7 +691,7 @@ TempSDataTest <- test_data[c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08
 # Train the model using rfsrc
 rf_model_temp_sensor <- rfsrc(
   AQI ~ . , 
-  data = TempDataTrain, 
+  data = TempSDataTrain, 
   ntree = 500,
   importance = "none",
   mtry = 4,
