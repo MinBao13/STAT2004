@@ -510,27 +510,27 @@ barplot(rf_model_imp$importance,
         las = 2,
         cex.names = 0.7)
 
-PollutantDataTrain <- train_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","AQI")]
-PollutantDataTest <- test_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","AQI")]
+xNO2PollutantDataTrain <- train_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","AQI")]
+xNO2PollutantDataTest <- test_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","AQI")]
 
 # Train the model using rfsrc
-rf_model_pol <- rfsrc(
+rf_model_pol_xNO2 <- rfsrc(
   AQI ~ . , 
-  data = PollutantDataTrain, 
+  data = xNO2PollutantDataTrain, 
   ntree = 500,
   importance = "none",
   mtry = 4,
   seed = 42
 )
 
-print(rf_model_pol)
+print(rf_model_pol_xNO2)
 
 # --- PART 4: MODEL EVALUATION ---
 
 ## ---- Evaluate the trained regression model on the test set ----
-pred_obj <- predict(rf_model_pol, newdata = PollutantDataTest)
+pred_obj <- predict(rf_model_pol_xNO2, newdata = xNO2PollutantDataTest)
 y_hat    <- as.numeric(pred_obj$predicted)
-y_true   <- as.numeric(PollutantDataTest$AQI)
+y_true   <- as.numeric(xNO2PollutantDataTest$AQI)
 
 RMSE <- sqrt(mean((y_hat - y_true)^2))
 MAE  <- mean(abs(y_hat - y_true))
@@ -540,7 +540,7 @@ cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
             RMSE, MAE, R2_holdout))
 
 ## OOB R² from the trained model (last tree aggregated)
-R2_oob <- tail(rf_model_pol$rsq, 1)
+R2_oob <- tail(rf_model_pol_xNO2$rsq, 1)
 cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
 
 ## Optional: quick residual diagnostics
@@ -552,7 +552,7 @@ head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(r
 
 rf_model_imp <- rfsrc(
   AQI ~ . ,
-  data = PollutantDataTest,
+  data = xNO2PollutantDataTest,
   ntree = 500,
   na.action = "na.impute",
   importance = TRUE,
@@ -809,6 +809,10 @@ print(cm_xno)
 cat("\n===== Pollutant Model Confusion Matrix =====\n")
 cm_pollutant <- confmat_rf(rf_model_pol, PollutantDataTest)
 print(cm_pollutant)
+
+cat("\n===== Pollutant Model Excluding NO2 Confusion Matrix =====\n")
+cm_pollutant_xNO2 <- confmat_rf(rf_model_pol_xNO2, xNO2PollutantDataTest)
+print(cm_pollutant_xNO2)
 
 cat("\n===== Sensor Model Confusion Matrix =====\n")
 cm_sensor <- confmat_rf(rf_model_sensor, SensorDataTest)
