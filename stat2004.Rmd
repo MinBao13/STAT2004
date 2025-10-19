@@ -21,6 +21,7 @@ When you click the **Knit** button a document will be generated that includes bo
 library(dplyr)
 library(randomForestSRC)
 library(MASS)
+library(GGally)
 ```
 
 ```{r}
@@ -155,6 +156,12 @@ ConvertedPollute$AQI <- AQI_results$AQI
 ConvertedPollute$AQI_level <- AQI_results$Category
 ```
 
+
+```{r, fig.width=30, fig.height=20}
+ggpairs(ConvertedPollute[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","NO2(GT)","T", "RH", "AH", "AQI","AQI_level")], aes(colour = AQI_level, alpha = 0.4) )
+ggpairs(ConvertedPollute[c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)","T", "RH", "AH", "AQI","AQI_level")], aes(colour = AQI_level, alpha = 0.4) )
+```
+
 ```{r}
 rf_imp <- rfsrc(data = ConvertedPollute, nodesize = 1, nsplit = 10, nimpute = 2, na.action = "na.impute")
 ConvertedPollute <- rf_imp$xvar
@@ -182,8 +189,67 @@ biplot(pca_result, scale = 0)
 ```{r}
 pca_data <- as.data.frame(pca_result$x[, 1:2])  # Keep PC1 and PC2
 pca_rf_data <- cbind(pca_data, AQI = ConvertedPollute$AQI)
-rf_pca <- rfsrc(AQI ~ ., data = pca_rf_data, ntree = 500, seed = 42)
+
+# --- PART 3: RANDOM FOREST MODEL  ---
+
+# 3. Data Split (Training and Testing Sets)
+set.seed(42) # For reproducibility
+train_index <- sample(1:nrow(pca_rf_data), size = 0.8 * nrow(pca_rf_data)) # 80% for training
+train_data <- pca_rf_data[train_index, ]
+test_data <- pca_rf_data[-train_index, ]
+PCADataTrain <- (train_data[1:3])
+PCADataTest <- (test_data[1:3])
+
+# Train the model using rfsrc
+rf_pca <- rfsrc(
+  AQI ~ . , 
+  data = PCADataTrain, 
+  ntree = 100,
+  importance = "none",
+  seed = 42
+)
+
 print(rf_pca)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_pca, newdata = PCADataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(PCADataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_pca$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ . ,
+  data = PCADataTest,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
 ```
 
 
@@ -327,28 +393,28 @@ barplot(rf_model_imp$importance,
 ```
 
 ```{r}
-#Model excluding Carbon Monoxide and Nitrogen Dioxide
+#Model excluding Nitrogen Oxides
 
 ##EDITING THIS 
-OtherDataTrain <- train_data[-c(1,8,15)]
-OtherDataTest <- test_data[-c(1,8,15)]
+xNODataTrain <- train_data[-c(6,8,15)]
+xNODataTest <- test_data[-c(6,8,15)]
 
-rf_model_other <- rfsrc(
+rf_model_xNO <- rfsrc(
   AQI ~ ., 
-  data = OtherDataTrain, 
+  data = xNODataTrain, 
   ntree = 300,
   importance = "none",
   seed = 42
 )
 
-print(rf_model_other)
+print(rf_model_xNO)
 
 # --- PART 4: MODEL EVALUATION ---
 
 ## ---- Evaluate the trained regression model on the test set ----
-pred_obj <- predict(rf_model_other, newdata = OtherDataTest)
+pred_obj <- predict(rf_model_xNO, newdata = xNODataTest)
 y_hat    <- as.numeric(pred_obj$predicted)
-y_true   <- as.numeric(OtherDataTest$AQI)
+y_true   <- as.numeric(xNODataTest$AQI)
 
 RMSE <- sqrt(mean((y_hat - y_true)^2))
 MAE  <- mean(abs(y_hat - y_true))
@@ -358,7 +424,7 @@ cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
             RMSE, MAE, R2_holdout))
 
 ## OOB R² from the trained model (last tree aggregated)
-R2_oob <- tail(rf_model_other$rsq, 1)
+R2_oob <- tail(rf_model_xNO$rsq, 1)
 cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
 
 ## Optional: quick residual diagnostics
@@ -369,8 +435,8 @@ cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
 head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
 
 rf_model_imp <- rfsrc(
-  AQI ~ (. - AQI_level - `CO(GT)` - `NO2(GT)`) ,
-  data = OtherDataTrain,
+  AQI ~ . ,
+  data = xNODataTest,
   ntree = 500,
   na.action = "na.impute",
   importance = TRUE,
@@ -384,6 +450,294 @@ barplot(rf_model_imp$importance,
         cex.names = 0.7)
 ```
 
+```{r}
+# --- PART 3: RANDOM FOREST MODEL  ---
+
+PollutantDataTrain <- train_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)", "NO2(GT)", "AQI")]
+PollutantDataTest <- test_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)", "NO2(GT)", "AQI")]
+
+# Train the model using rfsrc
+rf_model_pol <- rfsrc(
+  AQI ~ . , 
+  data = PollutantDataTrain, 
+  ntree = 500,
+  importance = "none",
+  mtry = 4,
+  seed = 42
+)
+
+print(rf_model_pol)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_pol, newdata = PollutantDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(PollutantDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_pol$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ . ,
+  data = PollutantDataTest,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+
+PollutantDataTrain <- train_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","AQI")]
+PollutantDataTest <- test_data[c("CO(GT)","NMHC(GT)","C6H6(GT)","NOx(GT)","AQI")]
+
+# Train the model using rfsrc
+rf_model_pol <- rfsrc(
+  AQI ~ . , 
+  data = PollutantDataTrain, 
+  ntree = 500,
+  importance = "none",
+  mtry = 4,
+  seed = 42
+)
+
+print(rf_model_pol)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_pol, newdata = PollutantDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(PollutantDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_pol$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ . ,
+  data = PollutantDataTest,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+```
+
+```{r}
+#Sensor Model
+
+SensorDataTrain <- train_data[c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)", "AQI")]
+SensorDataTest <- test_data[c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)", "AQI")]
+
+# Train the model using rfsrc
+rf_model_sensor <- rfsrc(
+  AQI ~ . , 
+  data = SensorDataTrain, 
+  ntree = 500,
+  importance = "none",
+  mtry = 4,
+  seed = 42
+)
+
+print(rf_model_sensor)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_sensor, newdata = SensorDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(SensorDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_sensor$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ . ,
+  data = SensorDataTest,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+```
+
+```{r}
+#General Air Characteristics (T, RH, AH)
+
+TempDataTrain <- train_data[c("T", "RH", "AH", "AQI")]
+TempDataTest <- test_data[c("T", "RH", "AH", "AQI")]
+
+# Train the model using rfsrc
+rf_model_temp <- rfsrc(
+  AQI ~ . , 
+  data = TempDataTrain, 
+  ntree = 500,
+  importance = "none",
+  mtry = 4,
+  seed = 42
+)
+
+print(rf_model_temp)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_temp, newdata = TempDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(TempDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_temp$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ . ,
+  data = TempDataTest,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+
+# General Air Characteristics (T, RH, AH) Testing to see the effects of adding sensor data
+
+TempSDataTrain <- train_data[c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)","T", "RH", "AH", "AQI")]
+TempSDataTest <- test_data[c("PT08.S2(NMHC)","PT08.S1(CO)", "PT08.S5(O3)", "PT08.S3(NOx)","PT08.S4(NO2)","T", "RH", "AH", "AQI")]
+
+# Train the model using rfsrc
+rf_model_temp_sensor <- rfsrc(
+  AQI ~ . , 
+  data = TempDataTrain, 
+  ntree = 500,
+  importance = "none",
+  mtry = 4,
+  seed = 42
+)
+
+print(rf_model_temp_sensor)
+
+# --- PART 4: MODEL EVALUATION ---
+
+## ---- Evaluate the trained regression model on the test set ----
+pred_obj <- predict(rf_model_temp_sensor, newdata = TempSDataTest)
+y_hat    <- as.numeric(pred_obj$predicted)
+y_true   <- as.numeric(TempSDataTest$AQI)
+
+RMSE <- sqrt(mean((y_hat - y_true)^2))
+MAE  <- mean(abs(y_hat - y_true))
+R2_holdout <- 1 - sum((y_hat - y_true)^2) / sum( (y_true - mean(y_true))^2 )
+
+cat(sprintf("\nHoldout metrics\nRMSE: %.3f\nMAE : %.3f\nR²  : %.3f\n",
+            RMSE, MAE, R2_holdout))
+
+## OOB R² from the trained model (last tree aggregated)
+R2_oob <- tail(rf_model_temp_sensor$rsq, 1)
+cat(sprintf("OOB R² (training): %.3f\n", R2_oob))
+
+## Optional: quick residual diagnostics
+resid <- y_true - y_hat
+cat(sprintf("Residual mean: %.3f | SD: %.3f\n", mean(resid), sd(resid)))
+
+# If you want a quick glance table:
+head(data.frame(AQI_true = y_true, AQI_pred = round(y_hat,1), Residual = round(resid,1)))
+
+rf_model_imp <- rfsrc(
+  AQI ~ . ,
+  data = TempSDataTest,
+  ntree = 500,
+  na.action = "na.impute",
+  importance = TRUE,
+  seed = 42
+)
+sort(rf_model_imp$importance, decreasing = TRUE)[1:10]
+barplot(rf_model_imp$importance,
+        main = "Variable Importance ",
+        col = "skyblue",
+        las = 2,
+        cex.names = 0.7)
+```
 
 ```{r}
 
@@ -405,4 +759,64 @@ cm <- table(Truth = true_level, Pred = pred_level)
 acc <- sum(diag(cm)) / sum(cm)
 cm
 cat(sprintf("\nCategorical accuracy after bucketing: %.3f\n", acc))
+```
+
+```{r}
+# --- Helpers ---
+bucket_aqi <- function(x){
+  cut(x,
+      breaks = c(-Inf, 50, 100, 150, 200, 300, 400, Inf),
+      labels = c("Good","Moderate","Unhealthy (Sensitive)",
+                 "Unhealthy","Very Unhealthy","Hazardous","Extremely Hazardous"),
+      right = TRUE)
+}
+
+confmat_rf <- function(model, newdata, target = "AQI", truth_levels_col = "AQI_level"){
+  pred <- predict(model, newdata = newdata)$predicted
+  pred_level <- bucket_aqi(as.numeric(pred))
+
+  true_level <- if (truth_levels_col %in% names(newdata)) {
+    newdata[[truth_levels_col]]
+  } else {
+    bucket_aqi(as.numeric(newdata[[target]]))
+  }
+
+  pred_level <- factor(pred_level, levels = levels(bucket_aqi(0)))
+  true_level <- factor(true_level, levels = levels(bucket_aqi(0)))
+
+  table(Truth = true_level, Pred = pred_level)
+}
+
+# --- Confusion matrices for each of your models/datasets ---
+cat("\n===== PCA Model Confusion Matrix =====\n")
+cm_pca <- confmat_rf(rf_pca, PCADataTest)
+print(cm_pca)
+
+cat("\n===== All Variables Model Confusion Matrix =====\n")
+cm_all <- confmat_rf(rf_model_all, AllDataTest)
+print(cm_all)
+
+cat("\n===== Excluding CO & NO2 Model Confusion Matrix =====\n")
+cm_other <- confmat_rf(rf_model_other, OtherDataTest)
+print(cm_other)
+
+cat("\n===== Excluding NOx & NO2 Model Confusion Matrix =====\n")
+cm_xno <- confmat_rf(rf_model_xNO, xNODataTest)
+print(cm_xno)
+
+cat("\n===== Pollutant Model Confusion Matrix =====\n")
+cm_pollutant <- confmat_rf(rf_model_pol, PollutantDataTest)
+print(cm_pollutant)
+
+cat("\n===== Sensor Model Confusion Matrix =====\n")
+cm_sensor <- confmat_rf(rf_model_sensor, SensorDataTest)
+print(cm_sensor)
+
+cat("\n===== Temperature / RH / AH Model Confusion Matrix =====\n")
+cm_temp <- confmat_rf(rf_model_temp, TempDataTest)
+print(cm_temp)
+
+cat("\n===== Temperature + Sensor Confusion Matrix =====\n")
+cm_temp_sensor <- confmat_rf(rf_model_temp_sensor, TempSDataTest)
+print(cm_temp_sensor)
 ```
